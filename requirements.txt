@@ -1,1 +1,4 @@
 streamlit==1.39.0
+
+# AgentGuard UI and demo app requirements
+# Install with: pip install -r requirements.txt
