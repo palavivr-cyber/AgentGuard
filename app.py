@@ -1,8 +1,11 @@
 import streamlit as st
-import time
-import hashlib
-import json
-from datetime import datetime
+
+from src.agent import guarded_tool_call
+from src.blockchain import add_to_ledger, get_ledger
+from src.evaluator import evaluate_batch
+from src.evaluation_cases import EVALUATION_CASES
+from src.honeypot import honeypot_trap
+from src.moss_validator import runtime_guard
 
 st.set_page_config(page_title="AgentGuard - YC Winner", layout="wide", page_icon="🛡️")
 
@@ -13,142 +16,120 @@ TRUSTED_DB = {
     "c3d4e5f6g7h8i9j0": {"name": "Contract CTR-1001 - Legal Approved", "trust": 0.97, "vendor": "Legal"},
 }
 
-# For Blockchain Ledger - Keep history
-if "ledger" not in st.session_state:
-    st.session_state.ledger = []
-
-# --- CORE ENGINE - MOSS 7ms ---
-def moss_fast_search(doc_hash):
-    start = time.time()
-    time.sleep(0.007) # Simulate Moss 7ms
-    data = TRUSTED_DB.get(doc_hash)
-    latency = round((time.time() - start)*1000, 2)
-    if data:
-        return {"found": True, "trust": data["trust"], "latency": latency, "doc": data["name"], "status": "VERIFIED", "vendor": data["vendor"]}
-    else:
-        return {"found": False, "trust": 0.12, "latency": latency, "doc": "UNKNOWN / TAMPERED", "status": "UNTRUSTED", "vendor": "UNKNOWN"}
-
-def runtime_guard(doc_hash, action):
-    moss = moss_fast_search(doc_hash)
-    if moss["trust"] < 0.7:
-        return {**moss, "allow": False, "action": "🚫 BLOCKED", "alert": "🚨 REAL-TIME GUARDRAIL TRIGGERED", "color": "red"}
-    else:
-        if action == "payment" and moss["trust"] < 0.9:
-            return {**moss, "allow": False, "action": "🚫 BLOCKED", "alert": "⚠️ HIGH-RISK NEEDS 0.9+ TRUST", "color": "orange"}
-        return {**moss, "allow": True, "action": "✅ ALLOWED", "alert": "✅ SAFE - TRUSTED CONTEXT", "color": "green"}
-
-def honeypot_trap(doc_hash, is_blocked):
-    if is_blocked and ("hacker" in doc_hash or "tamper" in doc_hash or "stale" in doc_hash or "fake" in doc_hash):
-        trace_id = hashlib.sha256(doc_hash.encode()).hexdigest()[:8].upper()
-        return {
-            "activated": True,
-            "trace_id": f"TRACE-{trace_id}",
-            "fake_account": "XXXX-XXXX-1234 (Fake Honeypot Account)",
-            "attacker_ip": "192.168.1.105 [LOGGED]",
-            "message": f"Attacker deceived with fake data. Trace ID {trace_id} logged."
-        }
-    return {"activated": False}
-
-def add_to_ledger(doc_hash, result, action):
-    block_hash = hashlib.sha256(f"{doc_hash}{time.time()}".encode()).hexdigest()[:16]
-    prev_hash = st.session_state.ledger[-1]["block_hash"] if st.session_state.ledger else "0000000000000000"
-    block = {
-        "block_no": len(st.session_state.ledger) + 101,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "doc_hash": doc_hash,
-        "action": action,
-        "decision": result["action"],
-        "trust": result["trust"],
-        "block_hash": block_hash,
-        "prev_hash": prev_hash,
-        "latency_ms": result["latency"]
-    }
-    st.session_state.ledger.append(block)
-    return block
-
 # --- UI ---
-st.title("🛡️ AgentGuard - Firewall for AI Agents")
-st.markdown("**YC Track: Agent Reliability, Security and Evaluation | Powered by Moss for <10ms Validation | Honeypot + Blockchain Ledger**")
-st.divider()
+st.markdown(
+    """
+    <style>
+    .block-container { max-width: 1180px; padding-top: 2.5rem; }
+    .eyebrow { color: #16a085; font-size: 0.76rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+    .hero { border-bottom: 1px solid #d9e2df; padding-bottom: 1.5rem; margin-bottom: 1.5rem; }
+    .hero h1 { color: #102a2a; font-size: 2.8rem; letter-spacing: -0.04em; margin: 0.25rem 0 0.5rem; }
+    .hero p { color: #526563; font-size: 1.05rem; max-width: 720px; }
+    .decision { border-radius: 10px; padding: 1.4rem 1.5rem; margin: 1rem 0; border: 1px solid; }
+    .decision h2 { margin: 0 0 0.35rem; }
+    .decision p { margin: 0; color: #435653; }
+    .allow { background: #eaf8f1; border-color: #78c9a5; }
+    .block { background: #fff0ed; border-color: #ee9c8d; }
+    .review { background: #fff8e5; border-color: #e7c66b; }
+    </style>
+    <div class="hero">
+      <div class="eyebrow">Runtime safety gateway · local retrieval demo</div>
+      <h1>AgentGuard</h1>
+      <p>Validate context before an AI agent executes a sensitive action. Retrieve evidence, enforce policy, and leave an explainable audit trail.</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
-left, right = st.columns([1, 1.3])
+test_cases = [
+    (case["doc_hash"], case["name"], case["action"])
+    for case in EVALUATION_CASES
+]
+evaluation = evaluate_batch(EVALUATION_CASES, runtime_guard)
 
-with left:
-    st.subheader("🔍 Live Agent Firewall Test")
-    st.info("✅ Trusted: a1b2c3d4e5f6g7h8 | 🚫 Hacker: hacker_inject_999 | Try: tampered_amt_1")
-    
-    doc_hash_input = st.text_input("Document Hash / Invoice ID", value="a1b2c3d4e5f6g7h8")
-    agent_action = st.selectbox("Agent Action", ["payment", "read_email", "delete_file", "send_contract", "approve_po"])
-    
-    if st.button("▶️ RUN GUARDRAIL CHECK", use_container_width=True, type="primary"):
-        result = runtime_guard(doc_hash_input, agent_action)
-        trap = honeypot_trap(doc_hash_input, not result["allow"])
-        ledger_block = add_to_ledger(doc_hash_input, result, agent_action)
 
-        if result["allow"]:
-            st.success(f"{result['alert']} - {result['action']}")
+def format_latency(latency_ms):
+    return "<0.01 ms" if latency_ms < 0.01 else f"{latency_ms:.2f} ms"
+
+guard_tab, evaluation_tab, audit_tab = st.tabs(["Guardrail", "Evaluation", "Audit trail"])
+
+with guard_tab:
+    left, right = st.columns([0.85, 1.15], gap="large")
+    with left:
+        st.markdown("#### Test an agent request")
+        scenario_names = [name for _, name, _ in test_cases]
+        selected_name = st.selectbox("Scenario", scenario_names)
+        selected_hash, _, default_action = next(item for item in test_cases if item[1] == selected_name)
+        doc_hash_input = st.text_input("Context identifier", value=selected_hash)
+        agent_action = st.selectbox(
+            "Requested action",
+            ["payment", "read_email", "delete_file", "send_contract", "approve_po"],
+            index=["payment", "read_email", "delete_file", "send_contract", "approve_po"].index(default_action),
+        )
+        st.caption("The current retrieval adapter is explicitly labeled LOCAL_DEMO until Moss credentials are configured.")
+        run_check = st.button("Run guardrail check", use_container_width=True, type="primary")
+
+    with right:
+        st.markdown("#### Decision console")
+        if run_check:
+            agent_request = guarded_tool_call(agent_action, doc_hash_input)
+            result = agent_request["guard"]
+            trap = honeypot_trap(doc_hash_input, not result["allow"])
+            ledger_block = add_to_ledger(doc_hash_input, result, agent_action)
+            decision_class = result["decision"].lower()
+            st.markdown(
+                f'<div class="decision {decision_class}"><h2>{result["decision"]}</h2><p>{result["reason"]}</p></div>',
+                unsafe_allow_html=True,
+            )
+            metric_one, metric_two, metric_three = st.columns(3)
+            metric_one.metric("Trust", f"{result['trust'] * 100:.0f}%")
+            metric_two.metric("Retrieval", format_latency(result["latency"]))
+            metric_three.metric("Mode", result["retrieval_mode"])
+            st.write(f"**Evidence:** {result['doc']} · {result['vendor']}")
+            if trap["activated"]:
+                st.warning(f"Honeypot trace activated: {trap['trace_id']}")
+            st.write(f"**Tool execution:** {'Executed' if agent_request['executed'] else 'Prevented'}")
+            with st.expander("View decision payload"):
+                st.json(agent_request)
+            with st.expander("View audit entry"):
+                st.json(ledger_block)
         else:
-            st.error(f"{result['alert']} - {result['action']}")
+            st.info("Choose a scenario and run the check to see whether the agent may proceed.")
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Decision", result["action"])
-        c2.metric("Moss Latency", f"{result['latency']} ms", "-95%")
-        c3.metric("Trust Score", f"{result['trust']*100:.0f}%")
+with evaluation_tab:
+    st.markdown("#### Reproducible safety evaluation")
+    metric_one, metric_two, metric_three, metric_four, metric_five = st.columns(5)
+    metric_one.metric("Accuracy", f"{evaluation['accuracy'] * 100:.0f}%")
+    metric_two.metric("Blocked", str(evaluation["blocked"]))
+    metric_three.metric("Cases", str(evaluation["total_cases"]))
+    metric_four.metric("Median latency", format_latency(evaluation["median_latency_ms"]))
+    metric_five.metric("p95 latency", format_latency(evaluation["p95_latency_ms"]))
+    for item in evaluation["results"]:
+        result = item["result"]
+        status = "PASS" if item["passed"] else "FAIL"
+        st.markdown(
+            f"**{status} · {item['category']} · {item['name']}**  "
+            f"\n`{item['expected']}` expected · `{item['actual']}` returned · {format_latency(result['latency'])}"
+        )
+    st.markdown("#### Results by category")
+    for category, values in evaluation["category_results"].items():
+        st.write(
+            f"**{category}**: {values['passed']}/{values['total']} passed "
+            f"({values['accuracy'] * 100:.0f}%)"
+        )
 
-        st.json(result)
-
-        # UNIQUE FEATURE 1: HONEYPOT
-        if trap["activated"]:
-            st.warning("🪤 HONEYPOT TRAP ACTIVATED!")
-            st.code(f"""
-Trace ID: {trap['trace_id']}
-Fake Data Sent: {trap['fake_account']}
-Attacker IP: {trap['attacker_ip']}
-Status: Attacker deceived & logged for forensic
-            """)
-        
-        # UNIQUE FEATURE 2: BLOCKCHAIN LEDGER
-        st.subheader("🔗 Blockchain Evidence Added")
-        st.code(json.dumps(ledger_block, indent=2), language="json")
-
-with right:
-    st.subheader("📊 Evaluation & Latency Tracing Dashboard")
-    
-    test_cases = [
-        ("a1b2c3d4e5f6g7h8", "Legit INV100 $5000 - HAL Vendor"),
-        ("hacker_inject_999", "Fake INV999 $50k to Hacker Ltd [INJECTION]"),
-        ("b2c3d4e5f6g7h8i9", "Legit PO #PO2024 - SafeCorp"),
-        ("stale_reuse_001", "Duplicate Reuse Attack - INV100 reused"),
-        ("tampered_amt_1", "Tampered Amount $5000 -> $50000"),
-    ]
-    
-    blocked = 0
-    for h, name in test_cases:
-        r = runtime_guard(h, "payment")
-        blocked += 0 if r["allow"] else 1
-        icon = "✅" if r["allow"] else "🚫"
-        st.text(f"{icon} {name[:45]} | {r['latency']}ms | {r['trust']*100:.0f}% -> {r['action']}")
-
-    st.divider()
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Attacks Blocked", f"{blocked}/3", "100% Reliability")
-    m2.metric("Moss Avg Latency", "7.1ms", "Target <10ms ✅")
-    m3.metric("Agent Reliability", "99.2%", "Production")
-
-    st.markdown("""
-    **How we cover your track:**
-    - ✅ **Runtime Guardrail:** Blocks before agent acts
-    - ✅ **Context Validation:** Moss hash check <10ms
-    - ✅ **Evaluation:** Trust 0-100% + Attack Log
-    - ✅ **Latency Tracing:** 7ms vs 350ms DB
-    - ⭐ **UNIQUE - Honeypot:** Deceives attacker
-    - ⭐ **UNIQUE - Blockchain Ledger:** Immutable proof
-    """)
-
-    if st.session_state.ledger:
-        st.subheader("📜 Full Immutable Audit Chain")
-        for block in reversed(st.session_state.ledger[-3:]):
-            st.text(f"Block #{block['block_no']} | {block['timestamp']} | {block['decision']} | Hash {block['block_hash']} | Prev {block['prev_hash'][:8]}..")
+with audit_tab:
+    st.markdown("#### Application audit chain")
+    st.caption("Each decision is linked to the previous entry for traceability. This is an application hash chain, not an external blockchain.")
+    ledger = get_ledger()
+    if ledger:
+        for block in reversed(ledger[-5:]):
+            st.markdown(
+                f"**Block #{block['block_no']} · {block['decision']}**  "
+                f"\n`{block['timestamp']}` · `{block['doc_hash']}` · {format_latency(block['latency_ms'])}"
+            )
+    else:
+        st.info("No decisions have been recorded in this session yet.")
 
 st.divider()
-st.caption("Built for YC Fall 2026 x MOSS Zero Latency Sprint | AgentGuard v1.0 | Honeypot + Blockchain + Moss")
+st.caption("AgentGuard · Runtime guardrails, context validation, and explainable audit evidence")
