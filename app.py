@@ -9,13 +9,6 @@ from src.moss_validator import runtime_guard
 
 st.set_page_config(page_title="AgentGuard - YC Winner", layout="wide", page_icon="🛡️")
 
-# --- DATABASE ---
-TRUSTED_DB = {
-    "a1b2c3d4e5f6g7h8": {"name": "Invoice INV100 - HAL Vendor ABC - $5000", "trust": 0.95, "vendor": "HAL"},
-    "b2c3d4e5f6g7h8i9": {"name": "PO #PO2024 - Verified Supplier", "trust": 0.93, "vendor": "SafeCorp"},
-    "c3d4e5f6g7h8i9j0": {"name": "Contract CTR-1001 - Legal Approved", "trust": 0.97, "vendor": "Legal"},
-}
-
 # --- UI ---
 st.markdown(
     """
@@ -76,7 +69,7 @@ with guard_tab:
             ["payment", "read_email", "delete_file", "send_contract", "approve_po"],
             index=["payment", "read_email", "delete_file", "send_contract", "approve_po"].index(default_action),
         )
-        st.caption("The current retrieval adapter is explicitly labeled LOCAL_DEMO until Moss credentials are configured.")
+        st.caption("Retrieval mode is shown after each guardrail check.")
         run_check = st.button("Run guardrail check", use_container_width=True, type="primary")
 
     with right:
@@ -95,10 +88,16 @@ with guard_tab:
             metric_one.metric("Trust", f"{result['trust'] * 100:.0f}%")
             metric_two.metric("Retrieval", format_latency(result["latency"]))
             metric_three.metric("Mode", result["retrieval_mode"])
+            st.caption(f"Retrieval source: {result['retrieval_mode']}")
             st.write(f"**Evidence:** {result['doc']} · {result['vendor']}")
             if trap["activated"]:
                 st.warning(f"Honeypot trace activated: {trap['trace_id']}")
             st.write(f"**Tool execution:** {'Executed' if agent_request['executed'] else 'Prevented'}")
+            if agent_request["review_request"]:
+                st.info(
+                    "Human review queued: "
+                    f"{agent_request['review_request']['review_id']}"
+                )
             with st.expander("View decision payload"):
                 st.json(agent_request)
             with st.expander("View audit entry"):

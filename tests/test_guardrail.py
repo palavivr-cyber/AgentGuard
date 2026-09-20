@@ -1,15 +1,19 @@
 import unittest
+from unittest.mock import patch
 
 from src.blockchain import add_to_ledger, get_ledger, LEDGER
 from src.agent import guarded_tool_call
 from src.evaluator import evaluate_batch
 from src.evaluation_cases import EVALUATION_CASES
+from src.context_normalizer import normalize_context
 from src.moss_validator import runtime_guard
+from src.review import REVIEW_QUEUE
 
 
 class GuardrailTests(unittest.TestCase):
     def setUp(self):
         LEDGER.clear()
+        REVIEW_QUEUE.clear()
 
     def test_trusted_payment_is_allowed(self):
         result = runtime_guard("a1b2c3d4e5f6g7h8", "payment")
@@ -36,6 +40,20 @@ class GuardrailTests(unittest.TestCase):
 
         self.assertTrue(request["executed"])
         self.assertEqual(request["decision"], "ALLOW")
+
+    def test_review_request_is_queued_without_execution(self):
+        request = guarded_tool_call("read_email", "d4e5f6g7h8i9j0k1")
+
+        self.assertFalse(request["executed"])
+        self.assertEqual(request["decision"], "REVIEW")
+        self.assertEqual(request["review_request"]["status"], "PENDING")
+        self.assertEqual(len(REVIEW_QUEUE), 1)
+
+    def test_context_normalizer_bounds_invalid_trust(self):
+        result = normalize_context({"trust": "not-a-number", "latency": -4})
+
+        self.assertEqual(result["trust"], 0.0)
+        self.assertEqual(result["latency"], 0.0)
 
     def test_medium_trust_context_requires_review(self):
         result = runtime_guard("d4e5f6g7h8i9j0k1", "read_email")
@@ -82,6 +100,33 @@ class GuardrailTests(unittest.TestCase):
         blocked = add_to_ledger("blocked", runtime_guard("hacker_inject_999", "payment"), "payment")
 
         self.assertEqual([allowed["decision"], review["decision"], blocked["decision"]], ["ALLOW", "REVIEW", "BLOCK"])
+
+    @patch("src.retrieval_service.search_moss")
+    def test_moss_trusted_context_allows_payment(self, mock_search):
+        mock_search.return_value = {
+            "found": True,
+            "trust": 0.96,
+            "latency": 2.4,
+            "doc": "Verified invoice",
+            "status": "VERIFIED",
+            "vendor": "HAL",
+            "retrieval_mode": "MOSS",
+        }
+
+        result = runtime_guard("external-doc-id", "payment")
+
+        self.assertTrue(result["allow"])
+        self.assertEqual(result["decision"], "ALLOW")
+        self.assertEqual(result["retrieval_mode"], "MOSS")
+
+    @patch("src.retrieval_service.search_moss")
+    def test_moss_error_blocks_sensitive_action(self, mock_search):
+        mock_search.side_effect = Exception("Moss unavailable")
+
+        result = runtime_guard("external-doc-id", "payment")
+
+        self.assertFalse(result["allow"])
+        self.assertEqual(result["decision"], "BLOCK")
 
 
 if __name__ == "__main__":

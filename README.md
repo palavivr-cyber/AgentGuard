@@ -5,6 +5,7 @@ AgentGuard is a runtime safety gateway for transaction-oriented AI agents. It va
 ## What this project does
 
 - Validates document trust through a retrieval adapter with an explicit local demo mode
+- Provides a server-side Moss adapter boundary with fail-closed error handling
 - Blocks risky actions like payment or file deletion when trust is too low
 - Detects known attack patterns such as injection, tampered amounts, and stale reuse
 - Triggers a honeypot trap to mislead bad actors
@@ -55,17 +56,45 @@ The app includes a few sample hashes and attack values:
 ## Project structure
 
 - `app.py` — Streamlit UI and firewall logic
+- `api.py` — FastAPI gateway entry point for agent tool requests
 - `src/agent.py` — guarded agent-tool boundary
+- `src/api_models.py` — Pydantic request and response models
+- `src/retrieval_service.py` — retrieval orchestration used by the gateway and policy engine
+- `src/retrieval_models.py` — normalized retrieval result contract
+- `src/local_retrieval.py` — explicitly labeled local demo provider
 - `src/evaluation_cases.py` — shared 12-case security evaluation corpus
+- `src/moss_client.py` — server-side Moss client boundary and secret lookup
+- `src/context_normalizer.py` — normalized retrieval contract for policy evaluation
+- `src/review.py` — human-review queue for ambiguous decisions
 - `src/` — supporting modules for blockchain, evaluation, honeypot, and validation
 - `docs/architecture.md` — system architecture and Moss integration boundary
 - `docs/PRD.md` — product requirements and evaluation criteria
 - `tests/` — focused behavioral tests
 - `requirements.txt` — Python dependencies
 
-## Notes
+## Moss integration
 
-The current repository runs in `LOCAL_DEMO` retrieval mode because Moss credentials or SDK access are not configured. Local latency is measured and labeled as local; it must not be presented as a Moss benchmark. Configure the Moss adapter before making production or sub-10ms Moss claims.
+Moss integration is implemented in `src/moss_client.py` using the official Python SDK.
+
+The adapter:
+
+- Loads the `agentguard-context` index
+- Queries Moss with `MossClient` and `QueryOptions(top_k=1)`
+- Maps Moss score and metadata into AgentGuard trust evidence
+- Reports successful retrieval as `MOSS`
+- Uses `LOCAL_DEMO` only when Moss is not configured
+- Returns `MOSS_ERROR` with zero trust when Moss fails
+
+Configure these values only through Streamlit Cloud Secrets or local `.streamlit/secrets.toml`:
+
+```toml
+MOSS_PROJECT_ID = "your-project-id"
+MOSS_PROJECT_KEY = "your-project-key"
+```
+
+The application reads these settings only at runtime. Credentials are never returned in decision payloads or audit entries.
+
+The `REVIEW` path creates a pending in-memory human-review request and prevents tool execution. The review queue is intentionally a prototype service boundary; production use requires durable storage and authenticated reviewer actions.
 
 The audit ledger is an application-level hash chain, not an external blockchain. This is a prototype for product evaluation and hackathon demonstration, not a production security system.
 
@@ -78,3 +107,35 @@ The Evaluation tab runs 12 deterministic cases across trusted actions, ambiguous
 ```bash
 python -m unittest discover -s tests -v
 ```
+
+## Run the gateway API
+
+Install the dependencies, then start FastAPI with Uvicorn:
+
+```bash
+python -m uvicorn api:app --host 127.0.0.1 --port 8000
+```
+
+Health check:
+
+```text
+http://127.0.0.1:8000/health
+```
+
+OpenAPI documentation:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+Example request:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/guard/tool-request \
+	-H "Content-Type: application/json" \
+	-d '{"action":"payment","doc_hash":"a1b2c3d4e5f6g7h8"}'
+```
+
+The API returns `ALLOW`, `BLOCK`, or `REVIEW` in the response body. Only `ALLOW` can execute a tool. Invalid requests return `422`. The Streamlit app and FastAPI gateway are separate runtime surfaces; deploying the Streamlit demo does not automatically deploy the API.
+
+The gateway connects to retrieval through `src/retrieval_service.py`. That service selects the Moss adapter when configured, uses the `LOCAL_DEMO` provider only when Moss is not configured, normalizes the result, and fails closed with `MOSS_ERROR` when a configured provider fails. Retrieval evidence is returned separately from the policy decision; retrieval alone never authorizes a tool.
