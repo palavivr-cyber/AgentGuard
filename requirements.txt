@@ -1,4 +1,5 @@
 streamlit==1.39.0
+pillow==10.4.0
 
 # AgentGuard UI and demo app requirements
 # Install with: pip install -r requirements.txt
