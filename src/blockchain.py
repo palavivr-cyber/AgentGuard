@@ -12,7 +12,7 @@ def add_to_ledger(doc_hash, result, action):
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "doc_hash": doc_hash,
         "action": action,
-        "decision": result["action"],
+        "decision": result["decision"],
         "trust": result["trust"],
         "block_hash": block_hash,
         "prev_hash": prev_hash,

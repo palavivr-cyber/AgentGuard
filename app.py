@@ -31,6 +31,16 @@ st.markdown(
     .allow { background: #eaf8f1; border-color: #78c9a5; }
     .block { background: #fff0ed; border-color: #ee9c8d; }
     .review { background: #fff8e5; border-color: #e7c66b; }
+    .result-row { border-radius: 8px; padding: 0.7rem 0.9rem; margin: 0.45rem 0; border: 1px solid; }
+    .result-row strong { color: #203331; }
+    .result-row p { margin: 0.25rem 0 0; color: #526563; font-size: 0.9rem; }
+    .result-allow { background: #f1fbf6; border-color: #a4d9bd; }
+    .result-block { background: #fff5f2; border-color: #efb0a5; }
+    .result-review { background: #fffaf0; border-color: #ecd58c; }
+    .status-badge { display: inline-block; border-radius: 999px; padding: 0.16rem 0.55rem; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; }
+    .badge-allow { background: #d5f2e2; color: #17663d; }
+    .badge-block { background: #ffdcd6; color: #9c2f22; }
+    .badge-review { background: #ffedb8; color: #795900; }
     </style>
     <div class="hero">
       <div class="eyebrow">Runtime safety gateway · local retrieval demo</div>
@@ -106,10 +116,16 @@ with evaluation_tab:
     metric_five.metric("p95 latency", format_latency(evaluation["p95_latency_ms"]))
     for item in evaluation["results"]:
         result = item["result"]
+        decision = item["actual"].lower()
         status = "PASS" if item["passed"] else "FAIL"
         st.markdown(
-            f"**{status} · {item['category']} · {item['name']}**  "
-            f"\n`{item['expected']}` expected · `{item['actual']}` returned · {format_latency(result['latency'])}"
+            f'<div class="result-row result-{decision}">'
+            f'<strong><span class="status-badge badge-{decision}">{decision.upper()}</span> '
+            f'{status} · {item["category"]} · {item["name"]}</strong>'
+            f'<p><code>{item["expected"]}</code> expected · '
+            f'<code>{item["actual"]}</code> returned · {format_latency(result["latency"])}</p>'
+            f'</div>',
+            unsafe_allow_html=True,
         )
     st.markdown("#### Results by category")
     for category, values in evaluation["category_results"].items():
@@ -124,9 +140,15 @@ with audit_tab:
     ledger = get_ledger()
     if ledger:
         for block in reversed(ledger[-5:]):
+            decision = block["decision"].lower()
             st.markdown(
-                f"**Block #{block['block_no']} · {block['decision']}**  "
-                f"\n`{block['timestamp']}` · `{block['doc_hash']}` · {format_latency(block['latency_ms'])}"
+                f'<div class="result-row result-{decision}">'
+                f'<strong><span class="status-badge badge-{decision}">{block["decision"]}</span> '
+                f'Block #{block["block_no"]}</strong>'
+                f'<p><code>{block["timestamp"]}</code> · '
+                f'<code>{block["doc_hash"]}</code> · {format_latency(block["latency_ms"])}</p>'
+                f'</div>',
+                unsafe_allow_html=True,
             )
     else:
         st.info("No decisions have been recorded in this session yet.")

@@ -72,8 +72,16 @@ class GuardrailTests(unittest.TestCase):
         first = add_to_ledger("first", runtime_guard("hacker_inject_999", "payment"), "payment")
         second = add_to_ledger("second", runtime_guard("hacker_inject_999", "payment"), "payment")
 
+        self.assertEqual(first["decision"], "BLOCK")
         self.assertEqual(second["prev_hash"], first["block_hash"])
         self.assertEqual(len(get_ledger()), 2)
+
+    def test_audit_entries_keep_color_codable_decisions(self):
+        allowed = add_to_ledger("allowed", runtime_guard("a1b2c3d4e5f6g7h8", "payment"), "payment")
+        review = add_to_ledger("review", runtime_guard("d4e5f6g7h8i9j0k1", "read_email"), "read_email")
+        blocked = add_to_ledger("blocked", runtime_guard("hacker_inject_999", "payment"), "payment")
+
+        self.assertEqual([allowed["decision"], review["decision"], blocked["decision"]], ["ALLOW", "REVIEW", "BLOCK"])
 
 
 if __name__ == "__main__":
