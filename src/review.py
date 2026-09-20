@@ -14,6 +14,8 @@ def create_review_request(action, doc_hash, guard_result):
         "doc_hash": doc_hash,
         "decision": guard_result["decision"],
         "reason": guard_result["reason"],
+        "reason_code": guard_result.get("reason_code"),
+        "policy_version": guard_result.get("policy_version"),
         "trust": guard_result["trust"],
         "status": "PENDING",
     }
@@ -23,3 +25,15 @@ def create_review_request(action, doc_hash, guard_result):
 
 def get_review_queue():
     return REVIEW_QUEUE
+
+
+def get_review_request(review_id):
+    return next((request for request in REVIEW_QUEUE if request["review_id"] == review_id), None)
+
+
+def resolve_review(review_id, status):
+    request = get_review_request(review_id)
+    if request is None or request["status"] != "PENDING":
+        return None
+    request["status"] = status
+    return request

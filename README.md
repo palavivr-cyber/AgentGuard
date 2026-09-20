@@ -61,11 +61,18 @@ The app includes a few sample hashes and attack values:
 - `src/api_models.py` — Pydantic request and response models
 - `src/retrieval_service.py` — retrieval orchestration used by the gateway and policy engine
 - `src/retrieval_models.py` — normalized retrieval result contract
+- `src/policy_models.py` — typed policy request and decision contracts
+- `src/policy_engine.py` — deterministic policy thresholds and reason codes
+- `src/execution_service.py` — ALLOW-only prototype tool execution boundary
+- `src/execution_models.py` — execution result contract
 - `src/local_retrieval.py` — explicitly labeled local demo provider
 - `src/evaluation_cases.py` — shared 12-case security evaluation corpus
 - `src/moss_client.py` — server-side Moss client boundary and secret lookup
 - `src/context_normalizer.py` — normalized retrieval contract for policy evaluation
 - `src/review.py` — human-review queue for ambiguous decisions
+- `src/review_service.py` — shared review service access boundary
+- `src/audit_service.py` — shared audit recording and verification boundary
+- `src/security_service.py` — suspicious blocked-request security traces
 - `src/` — supporting modules for blockchain, evaluation, honeypot, and validation
 - `docs/architecture.md` — system architecture and Moss integration boundary
 - `docs/PRD.md` — product requirements and evaluation criteria
@@ -139,3 +146,27 @@ curl -X POST http://127.0.0.1:8000/v1/guard/tool-request \
 The API returns `ALLOW`, `BLOCK`, or `REVIEW` in the response body. Only `ALLOW` can execute a tool. Invalid requests return `422`. The Streamlit app and FastAPI gateway are separate runtime surfaces; deploying the Streamlit demo does not automatically deploy the API.
 
 The gateway connects to retrieval through `src/retrieval_service.py`. That service selects the Moss adapter when configured, uses the `LOCAL_DEMO` provider only when Moss is not configured, normalizes the result, and fails closed with `MOSS_ERROR` when a configured provider fails. Retrieval evidence is returned separately from the policy decision; retrieval alone never authorizes a tool.
+
+## Policy evaluation
+
+The deterministic Python policy engine evaluates normalized retrieval evidence using policy version `agentguard-default-v1`:
+
+- trust below `0.70` blocks the request with `LOW_TRUST`
+- payment trust below `0.90` blocks the request with `HIGH_RISK_THRESHOLD`
+- trust from `0.70` up to but not including `0.85` requires review with `REVIEW_REQUIRED`
+- trusted evidence at or above `0.85` allows non-payment actions with `CONTEXT_ACCEPTED`
+- missing, failed, unknown-status, or unknown-source retrieval blocks the request
+
+The API returns the policy name, version, reason code, human-readable reason, and retrieval evidence together. OPA and LangGraph are future adapter options, not current runtime dependencies.
+
+## Execution, review, and security flow
+
+The end-to-end path is shared by the API and Streamlit UI:
+
+- `ALLOW` enters the Python execution service and returns a simulated execution result. No external payment, email, file, or contract tool is called by this prototype.
+- `REVIEW` creates one pending in-memory review request and remains non-executable.
+- `BLOCK` prevents execution. Suspicious identifiers such as injection, tampering, stale, or fake markers can create a sanitized demo security trace.
+- Every request is recorded by the application hash-chain audit service, including policy provenance, execution status, review id, and security trace id when present.
+- `GET /v1/reviews`, `GET /v1/audit`, and `GET /v1/audit/verify` expose read-only inspection for the demo.
+
+The reference architecture supplied for the hackathon is documented as a production target. PostgreSQL, OPA, LangGraph, OpenTelemetry, React/Node.js, and Rust are not claimed as current runtime dependencies.

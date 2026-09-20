@@ -1,7 +1,7 @@
 import streamlit as st
 
 from src.agent import guarded_tool_call
-from src.blockchain import add_to_ledger, get_ledger
+from src.audit_service import get_audit_events, record_audit_event
 from src.evaluator import evaluate_batch
 from src.evaluation_cases import EVALUATION_CASES
 from src.honeypot import honeypot_trap
@@ -78,7 +78,14 @@ with guard_tab:
             agent_request = guarded_tool_call(agent_action, doc_hash_input)
             result = agent_request["guard"]
             trap = honeypot_trap(doc_hash_input, not result["allow"])
-            ledger_block = add_to_ledger(doc_hash_input, result, agent_action)
+            ledger_block = record_audit_event(
+                doc_hash_input,
+                result,
+                agent_action,
+                execution=agent_request["execution"],
+                review=agent_request["review_request"],
+                security_trace=trap,
+            )
             decision_class = result["decision"].lower()
             st.markdown(
                 f'<div class="decision {decision_class}"><h2>{result["decision"]}</h2><p>{result["reason"]}</p></div>',
@@ -90,9 +97,17 @@ with guard_tab:
             metric_three.metric("Mode", result["retrieval_mode"])
             st.caption(f"Retrieval source: {result['retrieval_mode']}")
             st.write(f"**Evidence:** {result['doc']} · {result['vendor']}")
+            st.caption(
+                f"Policy: {result['policy_name']} {result['policy_version']} · "
+                f"Reason code: {result['reason_code']}"
+            )
             if trap["activated"]:
                 st.warning(f"Honeypot trace activated: {trap['trace_id']}")
             st.write(f"**Tool execution:** {'Executed' if agent_request['executed'] else 'Prevented'}")
+            st.caption(
+                f"Execution service: {agent_request['execution']['status']} · "
+                f"Request: {agent_request['request_id']}"
+            )
             if agent_request["review_request"]:
                 st.info(
                     "Human review queued: "
@@ -136,7 +151,7 @@ with evaluation_tab:
 with audit_tab:
     st.markdown("#### Application audit chain")
     st.caption("Each decision is linked to the previous entry for traceability. This is an application hash chain, not an external blockchain.")
-    ledger = get_ledger()
+    ledger = get_audit_events()
     if ledger:
         for block in reversed(ledger[-5:]):
             decision = block["decision"].lower()

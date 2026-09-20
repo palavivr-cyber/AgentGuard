@@ -21,6 +21,12 @@ class ToolRequest(BaseModel):
     doc_hash: str = Field(min_length=1, max_length=256)
 
 
+class ReviewDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["APPROVED", "REJECTED"]
+
+
 class HealthResponse(BaseModel):
     status: Literal["ok"]
     service: str
@@ -30,7 +36,12 @@ class HealthResponse(BaseModel):
 class GuardResponse(BaseModel):
     decision: Literal["ALLOW", "BLOCK", "REVIEW"]
     executed: bool
+    policy_name: str
+    policy_version: str
+    reason_code: str
     reason: str
+    request_id: str
+    execution: dict[str, Any]
     guard: dict[str, Any]
     retrieval: RetrievalResult
     review_request: dict[str, Any] | None = None
