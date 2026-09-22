@@ -46,8 +46,13 @@ def _get_credentials():
         raise MossNotConfigured
     # Credentials alone never enable cloud retrieval. This prevents surprise
     # usage while developing locally or running the deterministic evaluation.
-    if os.getenv("MOSS_ENABLED", "").lower() not in {"1", "true", "yes"}:
-        raise MossNotConfigured
+    try:
+        moss_enabled = _get_setting("MOSS_ENABLED")
+        if str(moss_enabled).lower() not in {"1", "true", "yes"}:
+            raise MossNotConfigured
+    except MossNotConfigured:
+        raise MossNotConfigured from None
+    
     return _get_setting("MOSS_PROJECT_ID"), _get_setting("MOSS_PROJECT_KEY")
 
 
