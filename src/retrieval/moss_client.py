@@ -1,7 +1,9 @@
 import asyncio
+import json
 import os
 import time
 from functools import lru_cache
+from pathlib import Path
 
 try:
     import streamlit as st
@@ -9,8 +11,9 @@ except ModuleNotFoundError:
     st = None
 
 try:
-    from moss import MossClient, QueryOptions
+    from moss import DocumentInfo, MossClient, QueryOptions
 except ModuleNotFoundError:
+    DocumentInfo = None
     MossClient = None
     QueryOptions = None
 
@@ -148,3 +151,54 @@ def moss_configuration():
         return configuration
     except MossNotConfigured:
         return {"configured": False, "index_name": _get_index_name()}
+
+
+async def _create_agentguard_index(project_id, project_key, index_name):
+    corpus_path = Path(__file__).resolve().parents[2] / "agentguard-context.json"
+    records = json.loads(corpus_path.read_text(encoding="utf-8"))
+    documents = [
+        DocumentInfo(
+            id=record["id"],
+            text=record["text"],
+            metadata={key: str(value) for key, value in record.get("metadata", {}).items()},
+        )
+        for record in records
+    ]
+    client = MossClient(project_id, project_key)
+    await client.create_index(index_name, documents, "moss-minilm")
+    return len(documents)
+
+
+def initialize_moss_index():
+    """Create the configured AgentGuard index once, without overwriting data.
+
+    Operators must select this explicitly from the Streamlit repair control.
+    Use a new MOSS_INDEX_NAME when repairing a corrupt cloud artifact; an
+    existing index is never updated, deleted, or replaced.
+    """
+    if DocumentInfo is None:
+        raise MossIntegrationError("The Moss SDK is not installed.")
+
+    project_id, project_key = _get_credentials()
+    index_name = _get_index_name()
+    try:
+        document_count = asyncio.run(_create_agentguard_index(project_id, project_key, index_name))
+    except Exception as error:
+        if "INDEX_EXISTS" in str(error):
+            raise MossIntegrationError(
+                f"Index {index_name!r} already exists. Choose a new MOSS_INDEX_NAME to repair it."
+            ) from error
+        raise MossIntegrationError from error
+
+    reset_moss_session()
+    return {"index_name": index_name, "document_count": document_count}
+
+
+def reset_moss_session():
+    """Clear process-local Moss state after an operator changes cloud state."""
+    global _client, _loaded_client_settings, _moss_failure, _moss_failure_reason
+    _client = None
+    _loaded_client_settings = None
+    _moss_failure = False
+    _moss_failure_reason = None
+    _search_moss_cached.cache_clear()

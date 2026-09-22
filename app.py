@@ -10,7 +10,7 @@ from src.execution_review.review_service import decide_and_execute_review, list_
 from src.policy.evaluation_cases import EVALUATION_CASES
 from src.policy.evaluator import evaluate_batch
 from src.policy.moss_validator import runtime_guard
-from src.retrieval.moss_client import moss_configuration
+from src.retrieval.moss_client import MossIntegrationError, initialize_moss_index, moss_configuration
 
 st.set_page_config(page_title="AgentGuard - YC Zero Latency", layout="wide", page_icon="🛡️")
 
@@ -77,6 +77,23 @@ if moss_runtime.get("error"):
     )
 elif moss_runtime["configured"] and evaluation_modes == ["MOSS"]:
     st.sidebar.success("Moss index loaded and retrieval is active.")
+
+with st.sidebar.expander("Repair Moss index"):
+    st.caption(
+        "Use only after setting MOSS_INDEX_NAME to a new name, such as "
+        "agentguard-context-v2. This creates that new index from the demo corpus; "
+        "it never changes or deletes the existing index."
+    )
+    if st.button("Create configured Moss index", key="create_moss_index"):
+        try:
+            created_index = initialize_moss_index()
+            st.success(
+                f"Created {created_index['index_name']} with "
+                f"{created_index['document_count']} documents. Reloading Moss."
+            )
+            st.rerun()
+        except MossIntegrationError as error:
+            st.error(f"Could not create Moss index: {error.__cause__ or error}")
 
 
 def format_latency(latency_ms):
