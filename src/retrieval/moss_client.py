@@ -58,8 +58,17 @@ async def _query_index(project_id, project_key, query, index_name):
         _client = MossClient(project_id, project_key)
         _loaded_client_settings = None
     if _loaded_client_settings != settings:
-        await _client.load_index(index_name)
-        _loaded_client_settings = settings
+        # load_index downloads the full corpus locally for session caching.
+        # The Moss cloud occasionally returns a response body that the current
+        # SDK cannot deserialise (encoding mismatch). We attempt load_index
+        # for the cache benefit but tolerate the failure: the cloud query
+        # endpoint works independently and does not require a prior load.
+        try:
+            await _client.load_index(index_name)
+            _loaded_client_settings = settings
+        except Exception:
+            # Mark as loaded anyway so we don't retry on every call.
+            _loaded_client_settings = settings
     return await _client.query(index_name, query, QueryOptions(top_k=1))
 
 
