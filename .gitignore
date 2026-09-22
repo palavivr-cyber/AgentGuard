@@ -9,6 +9,8 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .streamlit/
+!.streamlit/
+!.streamlit/secrets.toml.example
 .streamlit/config.toml
 Lib/
 Scripts/

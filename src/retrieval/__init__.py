@@ -7,6 +7,7 @@ from src.retrieval.local_retrieval import local_demo_search, moss_error_result
 from src.retrieval.moss_client import (
     MossIntegrationError,
     MossNotConfigured,
+    moss_configuration,
     search_moss,
 )
 from src.retrieval.retrieval_models import RetrievalResult
@@ -15,6 +16,7 @@ from src.retrieval.retrieval_service import retrieve_context
 __all__ = [
     "MossIntegrationError",
     "MossNotConfigured",
+    "moss_configuration",
     "RetrievalResult",
     "local_demo_search",
     "moss_error_result",

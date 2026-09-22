@@ -87,6 +87,8 @@ Configure these values only through Streamlit Cloud Secrets or local `.streamlit
 ```toml
 MOSS_PROJECT_ID = "your-project-id"
 MOSS_PROJECT_KEY = "your-project-key"
+# Optional. Moss is enabled automatically when both credentials are present.
+# Set to "false" only to deliberately use LOCAL_DEMO.
 MOSS_ENABLED = "true"
 ```
 
@@ -107,7 +109,13 @@ python scripts/seed_moss.py
 
 Set `MOSS_INDEX_NAME = "agentguard-context-v2"` in Streamlit secrets (or the API environment) when running the app. Never delete or overwrite an existing cloud index merely to rerun this demo setup.
 
-`MOSS_ENABLED` is intentionally required in addition to credentials. Without it, AgentGuard uses `LOCAL_DEMO` and makes no Moss calls. With it enabled, the process loads the selected index once and caches up to 256 document-hash lookups; restart the app after changing Moss credentials or index settings.
+Moss activates automatically when credentials are present (unless `MOSS_ENABLED=false`). The process loads the selected index locally before querying it and caches up to 256 document-hash lookups. This means an index load failure is reported as `MOSS_ERROR` and blocks sensitive actions rather than being presented as a successful Moss result. Restart the app after changing credentials or index settings.
+
+Before opening the app, verify the exact project and index without modifying cloud data:
+
+```powershell
+.venv\Scripts\python.exe scripts/check_moss.py
+```
 
 The application reads these settings only at runtime. Credentials are never returned in decision payloads or audit entries.
 

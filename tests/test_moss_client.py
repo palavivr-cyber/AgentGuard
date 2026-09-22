@@ -1,12 +1,33 @@
 import asyncio
+import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from src.moss_client import search_moss
+from src.retrieval.moss_client import MossNotConfigured, _get_credentials, moss_configuration
 
 
 class MossClientTests(unittest.TestCase):
+    @patch.dict(os.environ, {"MOSS_ENABLED": "false"}, clear=True)
+    def test_explicitly_disabled_moss_does_not_use_credentials(self):
+        with self.assertRaises(MossNotConfigured):
+            _get_credentials()
+
+    @patch("src.moss_client._get_credentials", return_value=("project-1234", "key"))
+    def test_configuration_exposes_non_secret_moss_failure(self, _mock_credentials):
+        import src.retrieval.moss_client as moss_client
+
+        previous_reason = moss_client._moss_failure_reason
+        moss_client._moss_failure_reason = "ValueError: index does not exist"
+        try:
+            configuration = moss_configuration()
+        finally:
+            moss_client._moss_failure_reason = previous_reason
+
+        self.assertEqual(configuration["project_id_suffix"], "1234")
+        self.assertEqual(configuration["error"], "ValueError: index does not exist")
+
     @patch("src.moss_client._get_credentials", return_value=("project", "key"))
     @patch("src.moss_client.MossClient")
     def test_search_maps_official_sdk_result(self, mock_client_class, _mock_credentials):

@@ -10,8 +10,18 @@ from src.execution_review.review_service import decide_and_execute_review, list_
 from src.policy.evaluation_cases import EVALUATION_CASES
 from src.policy.evaluator import evaluate_batch
 from src.policy.moss_validator import runtime_guard
+from src.retrieval.moss_client import moss_configuration
 
 st.set_page_config(page_title="AgentGuard - YC Zero Latency", layout="wide", page_icon="🛡️")
+
+moss_config = moss_configuration()
+if moss_config["configured"]:
+    st.sidebar.success(f"Moss configured · index: {moss_config['index_name']}")
+else:
+    st.sidebar.warning(
+        "Moss is not configured; decisions currently use LOCAL_DEMO. "
+        "Add project credentials to .streamlit/secrets.toml."
+    )
 
 # --- UI Styling ---
 st.markdown(
@@ -58,6 +68,15 @@ test_cases = [
     for case in EVALUATION_CASES
 ]
 evaluation = evaluate_batch(EVALUATION_CASES, runtime_guard)
+moss_runtime = moss_configuration()
+evaluation_modes = sorted({item["result"]["retrieval_mode"] for item in evaluation["results"]})
+if moss_runtime.get("error"):
+    st.sidebar.error(
+        f"Moss could not load index {moss_runtime['index_name']!r}: "
+        f"{moss_runtime['error']}"
+    )
+elif moss_runtime["configured"] and evaluation_modes == ["MOSS"]:
+    st.sidebar.success("Moss index loaded and retrieval is active.")
 
 
 def format_latency(latency_ms):
@@ -367,6 +386,9 @@ with evaluation_tab:
     metric_three.metric("Cases", str(evaluation["total_cases"]))
     metric_four.metric("Median latency", format_latency(evaluation["median_latency_ms"]))
     metric_five.metric("p95 latency", format_latency(evaluation["p95_latency_ms"]))
+    st.caption(f"Retrieval mode(s) used: {', '.join(evaluation_modes)}")
+    if moss_runtime.get("error"):
+        st.error(f"Moss diagnostic: {moss_runtime['error']}")
     st.caption(
         f"{evaluation['blocked']} blocked · {evaluation['false_blocks']} false blocks · "
         "A false allow is an unsafe case that was incorrectly allowed."

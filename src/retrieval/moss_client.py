@@ -23,10 +23,10 @@ class MossIntegrationError(Exception):
     pass
 
 
-INDEX_NAME = os.getenv("MOSS_INDEX_NAME", "agentguard-context")
 _client = None
 _loaded_client_settings = None
 _moss_failure = False
+_moss_failure_reason = None
 
 
 def _get_setting(name):
@@ -44,16 +44,24 @@ def _get_setting(name):
 def _get_credentials():
     if MossClient is None or QueryOptions is None:
         raise MossNotConfigured
-    # Credentials alone never enable cloud retrieval. This prevents surprise
-    # usage while developing locally or running the deterministic evaluation.
+    # A configured project is the normal production signal that Moss should be
+    # used. Requiring a second opt-in made deployments with valid secrets
+    # silently use the SQLite demo provider instead.
     try:
         moss_enabled = _get_setting("MOSS_ENABLED")
-        if str(moss_enabled).lower() not in {"1", "true", "yes"}:
-            raise MossNotConfigured
     except MossNotConfigured:
-        raise MossNotConfigured from None
+        moss_enabled = None
+    if moss_enabled is not None and str(moss_enabled).lower() in {"0", "false", "no", "off"}:
+        raise MossNotConfigured
     
     return _get_setting("MOSS_PROJECT_ID"), _get_setting("MOSS_PROJECT_KEY")
+
+
+def _get_index_name():
+    try:
+        return _get_setting("MOSS_INDEX_NAME")
+    except MossNotConfigured:
+        return "agentguard-context"
 
 
 async def _query_index(project_id, project_key, query, index_name):
@@ -63,37 +71,32 @@ async def _query_index(project_id, project_key, query, index_name):
         _client = MossClient(project_id, project_key)
         _loaded_client_settings = None
     if _loaded_client_settings != settings:
-        # load_index downloads the full corpus locally for session caching.
-        # The Moss cloud occasionally returns a response body that the current
-        # SDK cannot deserialise (encoding mismatch). We attempt load_index
-        # for the cache benefit but tolerate the failure: the cloud query
-        # endpoint works independently and does not require a prior load.
-        try:
-            await _client.load_index(index_name)
-            _loaded_client_settings = settings
-        except Exception:
-            # Mark as loaded anyway so we don't retry on every call.
-            _loaded_client_settings = settings
+        # The low-latency path runs against this locally loaded Moss index.
+        # A load failure must fail closed, never be shown as a Moss success.
+        await _client.load_index(index_name)
+        _loaded_client_settings = settings
     return await _client.query(index_name, query, QueryOptions(top_k=1))
 
 
 def search_moss(doc_hash):
-    global _moss_failure
+    global _moss_failure, _moss_failure_reason
     project_id, project_key = _get_credentials()
     if _moss_failure:
         raise MossIntegrationError("Moss retrieval is disabled after an earlier failure; restart after fixing the index.")
     try:
-        return _search_moss_cached(doc_hash, project_id, project_key, INDEX_NAME)
-    except MossIntegrationError:
+        return _search_moss_cached(doc_hash, project_id, project_key, _get_index_name())
+    except MossIntegrationError as error:
         # Do not repeatedly call a broken or unavailable cloud index in a
         # batch evaluation. A restart is an explicit retry after remediation.
         _moss_failure = True
+        cause = error.__cause__ or error
+        _moss_failure_reason = f"{type(cause).__name__}: {str(cause)[:300]}"
         raise
 
 
 @lru_cache(maxsize=256)
 def _search_moss_cached(doc_hash, project_id, project_key, index_name):
-    """Cache immutable document-hash retrieval only after Moss is explicitly enabled."""
+    """Cache immutable document-hash retrieval after Moss is configured."""
     start = time.perf_counter_ns()
 
     try:
@@ -129,3 +132,19 @@ def _search_moss_cached(doc_hash, project_id, project_key, index_name):
         "vendor": str(metadata.get("vendor", "UNKNOWN")),
         "retrieval_mode": "MOSS",
     }
+
+
+def moss_configuration():
+    """Return non-secret Moss configuration for health checks and the UI."""
+    try:
+        project_id, _ = _get_credentials()
+        configuration = {
+            "configured": True,
+            "index_name": _get_index_name(),
+            "project_id_suffix": project_id[-4:] if len(project_id) >= 4 else "configured",
+        }
+        if _moss_failure_reason:
+            configuration["error"] = _moss_failure_reason
+        return configuration
+    except MossNotConfigured:
+        return {"configured": False, "index_name": _get_index_name()}
