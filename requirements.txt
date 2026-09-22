@@ -2,7 +2,7 @@ streamlit==1.39.0
 pillow==10.4.0
 fastapi==0.115.6
 uvicorn==0.34.0
-moss>=1.9.0
+moss>=1.13.0
 httpx==0.28.1
 
 # AgentGuard UI and demo app requirements
