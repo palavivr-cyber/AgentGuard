@@ -1,16 +1,49 @@
 import time
+import sqlite3
+import os
 
+DB_PATH = "local_fallback.db"
 
-TRUSTED_DB = {
-    "a1b2c3d4e5f6g7h8": {"name": "Invoice INV100 - HAL Vendor ABC - $5000", "trust": 0.95, "vendor": "HAL"},
-    "b2c3d4e5f6g7h8i9": {"name": "PO #PO2024 - Verified Supplier", "trust": 0.93, "vendor": "SafeCorp"},
-    "d4e5f6g7h8i9j0k1": {"name": "Invoice INV104 - New Vendor - $1200", "trust": 0.82, "vendor": "NewVendor"},
-}
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS trusted_docs (
+            doc_hash TEXT PRIMARY KEY,
+            name TEXT,
+            trust REAL,
+            vendor TEXT
+        )
+    """)
+    
+    # Check if empty
+    cursor.execute("SELECT COUNT(*) FROM trusted_docs")
+    if cursor.fetchone()[0] == 0:
+        default_docs = [
+            ("a1b2c3d4e5f6g7h8", "Invoice INV100 - HAL Vendor ABC - $5000", 0.95, "HAL"),
+            ("b2c3d4e5f6g7h8i9", "PO #PO2024 - Verified Supplier", 0.93, "SafeCorp"),
+            ("d4e5f6g7h8i9j0k1", "Invoice INV104 - New Vendor - $1200", 0.82, "NewVendor"),
+        ]
+        cursor.executemany("INSERT INTO trusted_docs VALUES (?, ?, ?, ?)", default_docs)
+        conn.commit()
+    conn.close()
 
+# Initialize on module load
+init_db()
+
+def _get_doc(doc_hash):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT name, trust, vendor FROM trusted_docs WHERE doc_hash = ?", (doc_hash,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {"name": row[0], "trust": row[1], "vendor": row[2]}
+    return None
 
 def local_demo_search(doc_hash):
     start = time.perf_counter_ns()
-    data = TRUSTED_DB.get(doc_hash)
+    data = _get_doc(doc_hash)
     latency = round((time.perf_counter_ns() - start) / 1_000_000, 4)
     if data:
         return {

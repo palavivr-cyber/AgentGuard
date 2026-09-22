@@ -1,6 +1,6 @@
 import unittest
-
-from src.blockchain import LEDGER, add_to_ledger, verify_ledger
+import sqlite3
+from src.blockchain import LEDGER, add_to_ledger, verify_ledger, DB_PATH
 from src.honeypot import honeypot_trap
 
 
@@ -16,7 +16,11 @@ class AuditSecurityTests(unittest.TestCase):
         )
         self.assertTrue(verify_ledger())
 
-        LEDGER[0]["trust"] = 0.9
+        # Tamper directly in the SQLite database to simulate an attack
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("UPDATE blocks SET trust = 0.9 WHERE doc_hash = 'doc-1'")
+        conn.commit()
+        conn.close()
 
         self.assertFalse(verify_ledger())
 
