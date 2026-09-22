@@ -1,24 +1,5 @@
-from src.execution_models import ExecutionResult
+"""Backward-compatibility shim for src.execution_service."""
+import sys
+from src.execution_review import execution_service as _target
 
-
-def execute_tool(action, request_id, policy_decision):
-    """Execute the prototype tool boundary only after an ALLOW decision."""
-    decision = policy_decision["decision"]
-    if decision != "ALLOW":
-        return ExecutionResult(
-            request_id=request_id,
-            action=action,
-            decision=decision,
-            executed=False,
-            status="PREVENTED",
-            result=f"Tool execution prevented by {decision} policy decision.",
-        )
-
-    return ExecutionResult(
-        request_id=request_id,
-        action=action,
-        decision="ALLOW",
-        executed=True,
-        status="EXECUTED",
-        result=f"Prototype execution completed for {action}.",
-    )
+sys.modules[__name__] = _target

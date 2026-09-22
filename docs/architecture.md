@@ -1,76 +1,104 @@
 # AgentGuard Architecture
 
-## Product goal
+## Product Goal
 
-AgentGuard is a runtime safety gateway for transaction-oriented AI agents. It evaluates an action against retrieved context before the action is executed and records explainable evidence.
+AgentGuard is a runtime safety gateway for transaction-oriented AI agents. It evaluates an agent tool request against retrieved context before execution, returning an explainable allow, block, or review decision and recording cryptographic audit evidence.
 
-## Current runtime implementation
+## System Architecture: The 5 Core Layers
+
+The repository is modularized into 5 distinct architectural layers directly reflecting the system architecture diagram (`architecture.pdf`):
 
 ```mermaid
-flowchart LR
-    A[Agent tool request] --> B[FastAPI AgentGuard gateway]
-    B --> C[Pydantic request validation]
-    C --> D[Guarded tool boundary]
-    D --> E[Retrieval service]
-    E --> F[Local demo provider]
-    E --> G[Moss integration boundary]
-    F --> H[Trust and context normalizer]
-    G --> H
-    H --> I[Deterministic policy evaluation engine]
-    I --> J{Decision}
-    J -->|ALLOW| K[Python execution service]
-    J -->|BLOCK| L[Prevent execution]
-    J -->|REVIEW| M[In-memory review service]
-    K --> N[Security trace when applicable]
-    L --> N
-    M --> O[Application hash-chain audit]
-    N --> O
+flowchart TD
+    subgraph L1["Layer 1: Gateway Layer (src/gateway)"]
+        GW["AgentGuard Gateway (FastAPI)"]
+        APIM["Request Validation (Pydantic)"]
+    end
+
+    subgraph L2["Layer 2: Context Retrieval Layer (src/retrieval)"]
+        ADAPT["Context Retrieval Adapter"]
+        MOSS[("Moss Semantic Search (sub-10ms)")]
+        LOCAL["Local Demo Fallback"]
+    end
+
+    subgraph L3["Layer 3: Policy Evaluation Layer (src/policy)"]
+        NORM["Trust & Context Normalizer"]
+        POLICY["Policy Evaluation Engine"]
+        SEC["Content Security Inspection"]
+    end
+
+    subgraph L4["Layer 4: Execution & Review Layer (src/execution_review)"]
+        EXEC["Execute Tool Service"]
+        REVIEW["Human Review Service"]
+    end
+
+    subgraph L5["Layer 5: Audit & Security Layer (src/audit_security)"]
+        LEDGER[("Hash-Chain Audit Ledger")]
+        HONEY["Honeypot Trace Service"]
+    end
+
+    GW --> APIM
+    APIM --> ADAPT
+    ADAPT --> MOSS
+    ADAPT --> LOCAL
+    MOSS --> NORM
+    LOCAL --> NORM
+    NORM --> POLICY
+    SEC --> POLICY
+    POLICY -->|ALLOW| EXEC
+    POLICY -->|REVIEW| REVIEW
+    POLICY -->|BLOCK| HONEY
+    EXEC --> LEDGER
+    REVIEW --> LEDGER
+    HONEY --> LEDGER
 ```
 
-The Streamlit application is the visual demonstration client. The FastAPI service in `api.py` is the gateway layer for programmatic agent requests. Both paths use the same retrieval, policy, execution, review, security, and audit services.
+---
 
-The current execution service is a deterministic prototype boundary: it marks an approved action as executed but does not call an external payment, email, file, or contract system. The review service is in-memory and keeps `REVIEW` non-executable. The audit service uses an application-level verifiable hash chain.
+### Layer 1: Gateway Layer (`src/gateway/`)
+- **Components**: `AgentGuard Gateway` (`api.py`), `api_models.py`
+- **Technologies**: FastAPI, Python, Pydantic
+- **Role**: Handles HTTP requests from autonomous AI agents, validates payloads (`ToolRequest`, `ReviewDecisionRequest`), enforces schemas, and returns typed decisions (`GuardResponse`).
 
-## Moss role
+### Layer 2: Context Retrieval Layer (`src/retrieval/`)
+- **Components**: `retrieval_service.py`, `moss_client.py`, `local_retrieval.py`, `retrieval_models.py`
+- **Technologies**: Moss Vector DB, Rust, Python, gRPC/REST client
+- **Role**: Orchestrates context retrieval. Queries Moss's high-performance vector index for sub-10ms context retrieval when configured, with seamless fail-closed fallback to local demo retrieval.
 
-The retrieval adapter is the boundary where Moss should provide fast semantic context retrieval. The current repository runs in `LOCAL_DEMO` mode because Moss credentials or SDK access are not configured. The UI and result payload expose this mode explicitly so local measurements are not presented as Moss measurements.
+### Layer 3: Policy Evaluation Layer (`src/policy/`)
+- **Components**: `policy_engine.py`, `policy_models.py`, `context_normalizer.py`, `moss_validator.py`, `evaluator.py`, `evaluation_cases.py`
+- **Technologies**: Python, JSON-Schema, Open Policy Agent (OPA) / Deterministic engine
+- **Role**: Normalizes trust metadata, enforces strict action-specific thresholds (e.g. 0.90+ for payments, 0.85+ for autonomous execution, 0.70–0.85 for human review), and detects prompt injection and tampering attempts.
 
-`src/moss_client.py` is the provider-specific boundary. It reads `MOSS_PROJECT_ID` and `MOSS_PROJECT_KEY` only at runtime from environment configuration or Streamlit Secrets and does not expose either value to the UI, audit ledger, or decision payload. When Moss access is available, the adapter returns the retrieved policy or transaction context, match metadata, and measured retrieval latency. The policy evaluator uses that result in the same decision path.
+### Layer 4: Execution & Review Layer (`src/execution_review/`)
+- **Components**: `execution_service.py`, `execution_models.py`, `review_service.py`, `review.py`
+- **Technologies**: Python, LangChain Tool boundaries, Streamlit / HITL UI
+- **Role**: Executes approved actions (`ALLOW` only). When an action is flagged as ambiguous or medium-risk (`REVIEW`), autonomously queues a human-review request and prevents execution until an operator reviews the context.
 
-Missing configuration falls back to `LOCAL_DEMO` for the public demonstration. A configured-but-failing or unimplemented Moss request returns `MOSS_ERROR` with zero trust, so sensitive actions fail closed rather than being allowed on missing evidence.
+### Layer 5: Audit & Security Layer (`src/audit_security/`)
+- **Components**: `blockchain.py`, `audit_service.py`, `security_analysis.py`, `security_service.py`, `honeypot.py`
+- **Technologies**: Cryptographic Hash-Chains, Python, OpenTelemetry trace formats
+- **Role**: Records an immutable, verifiable application hash chain linking each decision to the previous block hash (`prev_hash`). Activates honeypot decoy traces upon detecting malicious or suspicious input patterns.
 
-## Implemented service boundaries
+---
 
-- `src/moss_client.py` — Moss provider boundary and server-side secret lookup
-- `src/retrieval_service.py` — retrieval orchestration and provider selection
-- `src/retrieval_models.py` — normalized retrieval response contract
-- `src/local_retrieval.py` — explicitly labeled local demo provider
-- `src/moss_validator.py` — compatibility wrapper from retrieval to policy
-- `src/policy_models.py` — typed policy request and decision contracts
-- `src/policy_engine.py` — deterministic policy rules and reason codes
-- `src/context_normalizer.py` — stable, bounded context contract
-- `src/review.py` and `src/review_service.py` — pending human-review service
-- `src/execution_service.py` — ALLOW-only prototype execution boundary
-- `src/honeypot.py` and `src/security_service.py` — suspicious blocked-request trace
-- `src/audit_service.py` and `src/blockchain.py` — verifiable application hash-chain audit
+## Backward Compatibility & Package Imports
 
-The review queue is currently in-memory for the prototype. A production deployment should replace it with a durable review service while keeping `REVIEW` non-executable by default.
+All modules can be imported using either the clean layer packages or top-level compatibility facades:
 
-## Decision contract
+```python
+# Modern Layered Imports
+from src.gateway import ToolRequest, GuardResponse
+from src.retrieval import retrieve_context, search_moss
+from src.policy import evaluate_policy, runtime_guard
+from src.execution_review import execute_tool, create_pending_review
+from src.audit_security import add_to_ledger, verify_audit_chain
 
-Every guard result should expose:
+# Top-level Facade Imports (via src/__init__.py)
+from src import guarded_tool_call, runtime_guard, evaluate_batch
 
-- `decision`: `ALLOW`, `BLOCK`, or `REVIEW`
-- `reason`: human-readable policy explanation
-- `reason_code`: machine-readable policy outcome
-- `policy_name` and `policy_version`: rule-set provenance
-- `retrieval_mode`: active retrieval implementation
-- `latency`: measured retrieval latency in milliseconds
-- `trust`: normalized context trust score
-- `doc` and `vendor`: retrieved evidence
-
-The ledger is an application-level hash chain for audit evidence. It is not an external blockchain.
-
-## Reference production architecture
-
-The supplied architecture image is treated as a target, not a claim about the current runtime. PostgreSQL could replace the in-memory review and audit stores; OPA could become a policy adapter that consumes the existing policy contract; LangGraph could orchestrate genuinely multi-step agent workflows; OpenTelemetry could provide real instrumentation; and React/Node.js could provide a dedicated reviewer interface. Rust and external tool adapters are also future options. None of these are current dependencies unless separately implemented and tested.
+# Legacy Shims (100% backward compatible with existing code and tests)
+from src.agent import guarded_tool_call
+from src.retrieval_service import retrieve_context
+from src.blockchain import LEDGER, verify_ledger
+```

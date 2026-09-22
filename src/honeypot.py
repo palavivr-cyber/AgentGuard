@@ -1,4 +1,5 @@
-from src.security_service import security_trace
+"""Backward-compatibility shim for src.honeypot."""
+import sys
+from src.audit_security import honeypot as _target
 
-def honeypot_trap(doc_hash, is_blocked):
-    return security_trace(doc_hash, is_blocked)
+sys.modules[__name__] = _target

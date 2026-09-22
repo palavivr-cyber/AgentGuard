@@ -1,17 +1,5 @@
-from typing import Literal
+"""Backward-compatibility shim for src.execution_models."""
+import sys
+from src.execution_review import execution_models as _target
 
-from pydantic import BaseModel, ConfigDict
-
-
-ExecutionStatus = Literal["EXECUTED", "PREVENTED", "FAILED"]
-
-
-class ExecutionResult(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    request_id: str
-    action: str
-    decision: Literal["ALLOW", "BLOCK", "REVIEW"]
-    executed: bool
-    status: ExecutionStatus
-    result: str
+sys.modules[__name__] = _target

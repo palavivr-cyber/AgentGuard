@@ -8,6 +8,7 @@ AgentGuard is a runtime safety gateway for transaction-oriented AI agents. It va
 - Provides a server-side Moss adapter boundary with fail-closed error handling
 - Blocks risky actions like payment or file deletion when trust is too low
 - Detects known attack patterns such as injection, tampered amounts, and stale reuse
+- Inspects untrusted document text and transaction fields before execution (prompt injection, amount mismatch, duplicate invoice, expired approval)
 - Triggers a honeypot trap to mislead bad actors
 - Stores an application-level hash-chain audit ledger for evidence and traceability
 - Shows everything in a Streamlit dashboard
@@ -53,30 +54,19 @@ The app includes a few sample hashes and attack values:
 - Reuse or stale case: `stale_reuse_001`
 - Tampered amount example: `tampered_amt_1`
 
-## Project structure
+## Project structure (5 Architectural Layers)
 
-- `app.py` — Streamlit UI and firewall logic
-- `api.py` — FastAPI gateway entry point for agent tool requests
-- `src/agent.py` — guarded agent-tool boundary
-- `src/api_models.py` — Pydantic request and response models
-- `src/retrieval_service.py` — retrieval orchestration used by the gateway and policy engine
-- `src/retrieval_models.py` — normalized retrieval result contract
-- `src/policy_models.py` — typed policy request and decision contracts
-- `src/policy_engine.py` — deterministic policy thresholds and reason codes
-- `src/execution_service.py` — ALLOW-only prototype tool execution boundary
-- `src/execution_models.py` — execution result contract
-- `src/local_retrieval.py` — explicitly labeled local demo provider
-- `src/evaluation_cases.py` — shared 12-case security evaluation corpus
-- `src/moss_client.py` — server-side Moss client boundary and secret lookup
-- `src/context_normalizer.py` — normalized retrieval contract for policy evaluation
-- `src/review.py` — human-review queue for ambiguous decisions
-- `src/review_service.py` — shared review service access boundary
-- `src/audit_service.py` — shared audit recording and verification boundary
-- `src/security_service.py` — suspicious blocked-request security traces
-- `src/` — supporting modules for blockchain, evaluation, honeypot, and validation
-- `docs/architecture.md` — system architecture and Moss integration boundary
+AgentGuard is structured into 5 architectural layers matching `architecture.pdf`:
+
+- **Layer 1: Gateway Layer (`src/gateway/`)**: API Gateway (`api.py`), Pydantic models (`api_models.py`)
+- **Layer 2: Context Retrieval Layer (`src/retrieval/`)**: Moss client (`moss_client.py`), retrieval orchestrator (`retrieval_service.py`), local demo provider (`local_retrieval.py`), schemas (`retrieval_models.py`)
+- **Layer 3: Policy Evaluation Layer (`src/policy/`)**: Deterministic policy engine (`policy_engine.py`), normalizer (`context_normalizer.py`), validator (`moss_validator.py`), policy models (`policy_models.py`), evaluation suite (`evaluator.py`, `evaluation_cases.py`)
+- **Layer 4: Execution & Review Layer (`src/execution_review/`)**: Tool execution boundary (`execution_service.py`), models (`execution_models.py`), human review service (`review_service.py`, `review.py`)
+- **Layer 5: Audit & Security Layer (`src/audit_security/`)**: Hash-chain ledger (`blockchain.py`), audit coordinator (`audit_service.py`), content security analyzer (`security_analysis.py`), honeypot tracer (`security_service.py`, `honeypot.py`)
+- `app.py` — Streamlit interactive UI dashboard
+- `docs/architecture.md` & `docs/architecture.pdf` — system architecture specifications
 - `docs/PRD.md` — product requirements and evaluation criteria
-- `tests/` — focused behavioral tests
+- `tests/` — comprehensive unit and behavioral test suite
 - `requirements.txt` — Python dependencies
 
 ## Moss integration
@@ -97,7 +87,27 @@ Configure these values only through Streamlit Cloud Secrets or local `.streamlit
 ```toml
 MOSS_PROJECT_ID = "your-project-id"
 MOSS_PROJECT_KEY = "your-project-key"
+MOSS_ENABLED = "true"
 ```
+
+Seed the committed, non-secret demo corpus into a new Moss project index:
+
+```bash
+$env:MOSS_PROJECT_ID = "your-project-id"
+$env:MOSS_PROJECT_KEY = "your-project-key"
+python scripts/seed_moss.py
+```
+
+This is an explicit one-time cloud mutation. If `agentguard-context` already exists, the script leaves it unchanged and does not download it again. To test a newly-created index explicitly, append `--verify`; do not use this option repeatedly. To create a fresh index without deleting data, set the same custom name for both seeding and the application:
+
+```powershell
+$env:MOSS_INDEX_NAME = "agentguard-context-v2"
+python scripts/seed_moss.py
+```
+
+Set `MOSS_INDEX_NAME = "agentguard-context-v2"` in Streamlit secrets (or the API environment) when running the app. Never delete or overwrite an existing cloud index merely to rerun this demo setup.
+
+`MOSS_ENABLED` is intentionally required in addition to credentials. Without it, AgentGuard uses `LOCAL_DEMO` and makes no Moss calls. With it enabled, the process loads the selected index once and caches up to 256 document-hash lookups; restart the app after changing Moss credentials or index settings.
 
 The application reads these settings only at runtime. Credentials are never returned in decision payloads or audit entries.
 
@@ -144,6 +154,36 @@ curl -X POST http://127.0.0.1:8000/v1/guard/tool-request \
 ```
 
 The API returns `ALLOW`, `BLOCK`, or `REVIEW` in the response body. Only `ALLOW` can execute a tool. Invalid requests return `422`. The Streamlit app and FastAPI gateway are separate runtime surfaces; deploying the Streamlit demo does not automatically deploy the API.
+
+### Content-security request example
+
+The guard accepts optional untrusted context and transaction verification fields. These are inspected independently of the document identifier; matching amounts are required when both are supplied.
+
+```json
+{
+  "action": "payment",
+  "doc_hash": "a1b2c3d4e5f6g7h8",
+  "context_text": "Invoice review notes",
+  "transaction": {
+    "invoice_amount": "6000.00",
+    "approved_amount": "5000.00"
+  }
+}
+```
+
+This request is blocked with `AMOUNT_MISMATCH`. Context containing instruction-override language is blocked with `PROMPT_INJECTION`. The response includes sanitized finding codes and the audit entry records those codes, not the source text.
+
+## Benchmark latency honestly
+
+Run the reproducible benchmark from the project root:
+
+```bash
+python scripts/benchmark.py --iterations 100
+```
+
+It reports retrieval and end-to-end p50/p95 separately and prints active retrieval modes. A run is a Moss benchmark only when every sample reports `MOSS`; otherwise the output explicitly says that it is not a Moss benchmark. Configure the Moss credentials above and populate the `agentguard-context` index before recording Moss results for the demo.
+
+When `MOSS_ENABLED=true`, the benchmark first performs one Moss preflight request. If it cannot retrieve through Moss, it stops before the full run to conserve cloud usage.
 
 The gateway connects to retrieval through `src/retrieval_service.py`. That service selects the Moss adapter when configured, uses the `LOCAL_DEMO` provider only when Moss is not configured, normalizes the result, and fails closed with `MOSS_ERROR` when a configured provider fails. Retrieval evidence is returned separately from the policy decision; retrieval alone never authorizes a tool.
 

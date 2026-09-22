@@ -73,6 +73,8 @@ class GuardrailTests(unittest.TestCase):
 
         self.assertEqual(report["total_cases"], 3)
         self.assertEqual(report["blocked"], 1)
+        self.assertEqual(report["false_allows"], 0)
+        self.assertEqual(report["false_blocks"], 0)
         self.assertEqual(report["passed"], 3)
         self.assertEqual(report["accuracy"], 1.0)
         self.assertGreaterEqual(report["p95_latency_ms"], report["median_latency_ms"])

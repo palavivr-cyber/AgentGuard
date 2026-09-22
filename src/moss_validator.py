@@ -1,6 +1,5 @@
-from src.retrieval_service import retrieve_context
-from src.policy_engine import evaluate_policy
+"""Backward-compatibility shim for src.moss_validator."""
+import sys
+from src.policy import moss_validator as _target
 
-def runtime_guard(doc_hash, action):
-    context = retrieve_context(doc_hash)
-    return evaluate_policy(action, context).as_legacy_result()
+sys.modules[__name__] = _target

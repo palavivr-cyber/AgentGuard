@@ -26,7 +26,9 @@ def health_check():
 
 @app.post("/v1/guard/tool-request", response_model=GuardResponse)
 def guard_tool_request(request: ToolRequest):
-    agent_request = guarded_tool_call(request.action, request.doc_hash)
+    agent_request = guarded_tool_call(
+        request.action, request.doc_hash, request.context_text, request.transaction
+    )
     guard_result = agent_request["guard"]
     retrieval = RetrievalResult.model_validate(
         {
@@ -34,7 +36,9 @@ def guard_tool_request(request: ToolRequest):
             for field in RetrievalResult.model_fields
         }
     )
-    honeypot = honeypot_trap(request.doc_hash, not guard_result["allow"])
+    honeypot = honeypot_trap(
+        request.doc_hash, not guard_result["allow"], guard_result.get("security_findings")
+    )
     audit = record_audit_event(
         request.doc_hash,
         guard_result,
