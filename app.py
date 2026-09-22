@@ -227,14 +227,26 @@ with review_tab:
     if not all_reviews:
         st.info("No reviews currently in the queue. Click below to simulate an ambiguous transaction requiring human review.")
         if st.button("📥 Trigger Sample Review Request (New Vendor Invoice INV104)", type="secondary"):
-            guarded_tool_call("read_email", "d4e5f6g7h8i9j0k1")
-            st.rerun()
+            sample_request = guarded_tool_call("read_email", "d4e5f6g7h8i9j0k1")
+            if sample_request["review_request"]:
+                st.rerun()
+            else:
+                st.error(
+                    "The sample request did not enter human review: "
+                    f"{sample_request['guard']['reason_code']}"
+                )
     else:
         top_bar_left, top_bar_right = st.columns([0.8, 0.2])
         with top_bar_right:
             if st.button("📥 Add Sample Review", help="Queue an ambiguous review case for testing"):
-                guarded_tool_call("read_email", "d4e5f6g7h8i9j0k1")
-                st.rerun()
+                sample_request = guarded_tool_call("read_email", "d4e5f6g7h8i9j0k1")
+                if sample_request["review_request"]:
+                    st.rerun()
+                else:
+                    st.error(
+                        "The sample request did not enter human review: "
+                        f"{sample_request['guard']['reason_code']}"
+                    )
 
         for req in reversed(all_reviews):
             status = req["status"]

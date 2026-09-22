@@ -42,6 +42,18 @@ class PolicyEngineTests(unittest.TestCase):
         self.assertEqual(result.decision, "REVIEW")
         self.assertEqual(result.reason_code, "REVIEW_REQUIRED")
 
+    def test_explicit_review_status_requires_human_review(self):
+        result = evaluate_policy("read_email", context(trust=0.82, status="REVIEW"))
+
+        self.assertEqual(result.decision, "REVIEW")
+        self.assertEqual(result.reason_code, "REVIEW_REQUIRED")
+
+    def test_explicit_review_status_blocks_payment(self):
+        result = evaluate_policy("payment", context(trust=0.82, status="REVIEW"))
+
+        self.assertEqual(result.decision, "BLOCK")
+        self.assertEqual(result.reason_code, "HIGH_RISK_REVIEW_REQUIRED")
+
     def test_threshold_boundaries(self):
         self.assertEqual(evaluate_policy("read_email", context(trust=0.70)).decision, "REVIEW")
         self.assertEqual(evaluate_policy("read_email", context(trust=0.85)).decision, "ALLOW")

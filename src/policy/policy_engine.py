@@ -64,7 +64,29 @@ def evaluate_policy(action: str, context: RetrievalResult) -> PolicyDecision:
             "red",
         )
 
-    if context.status.upper() not in {"VERIFIED", "TRUSTED", "MATCHED"}:
+    status = context.status.upper()
+    if status == "REVIEW":
+        if action == "payment":
+            return _decision(
+                request,
+                "BLOCK",
+                "BLOCKED",
+                "HIGH-RISK NEEDS VERIFIED CONTEXT",
+                "Payment actions cannot proceed on context awaiting human review.",
+                "HIGH_RISK_REVIEW_REQUIRED",
+                "orange",
+            )
+        return _decision(
+            request,
+            "REVIEW",
+            "REVIEW",
+            "HUMAN REVIEW REQUIRED",
+            "Retrieved context is explicitly marked for human review.",
+            "REVIEW_REQUIRED",
+            "yellow",
+        )
+
+    if status not in {"VERIFIED", "TRUSTED", "MATCHED"}:
         return _decision(
             request,
             "BLOCK",
