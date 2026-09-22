@@ -84,7 +84,10 @@ with st.sidebar.expander("Repair Moss index"):
         "agentguard-context-v2. This creates that new index from the demo corpus; "
         "it never changes or deletes the existing index."
     )
-    if st.button("Create configured Moss index", key="create_moss_index"):
+    moss_active = moss_runtime["configured"] and evaluation_modes == ["MOSS"]
+    if moss_active:
+        st.success("No repair needed: the configured Moss index is already loaded.")
+    elif st.button("Create configured Moss index", key="create_moss_index"):
         try:
             created_index = initialize_moss_index()
             st.success(

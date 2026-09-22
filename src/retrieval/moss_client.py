@@ -78,7 +78,21 @@ async def _query_index(project_id, project_key, query, index_name):
         # A load failure must fail closed, never be shown as a Moss success.
         await _client.load_index(index_name)
         _loaded_client_settings = settings
-    return await _client.query(index_name, query, QueryOptions(top_k=1))
+    # A document hash is an identity, not natural-language intent. Constrain
+    # the semantic search to the matching metadata so a visually similar
+    # trusted record can never authorize a different document.
+    return await _client.query(
+        index_name,
+        f"Document hash {query}",
+        QueryOptions(
+            top_k=1,
+            filter={
+                "$and": [
+                    {"field": "doc_hash", "condition": {"$eq": query}},
+                ],
+            },
+        ),
+    )
 
 
 def search_moss(doc_hash):

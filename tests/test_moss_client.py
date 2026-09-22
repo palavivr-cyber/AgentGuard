@@ -53,6 +53,12 @@ class MossClientTests(unittest.TestCase):
 
         mock_client.load_index.assert_awaited_once_with("agentguard-context")
         mock_client.query.assert_awaited_once()
+        query_options = mock_client.query.await_args.args[2]
+        self.assertEqual(query_options.filter, {
+            "$and": [
+                {"field": "doc_hash", "condition": {"$eq": "a1b2c3d4e5f6g7h8"}},
+            ],
+        })
         self.assertEqual(result["retrieval_mode"], "MOSS")
         self.assertEqual(result["trust"], 0.95)
         self.assertEqual(result["vendor"], "HAL")
